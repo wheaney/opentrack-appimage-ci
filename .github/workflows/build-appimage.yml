@@ -1,0 +1,250 @@
+name: Build OpenTrack AppImage
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      opentrack_version:
+        description: 'OpenTrack version to build (e.g., opentrack-2.3.14)'
+        required: false
+        default: 'latest'
+  
+  # Scheduled check for new releases (daily at 6 AM UTC)
+  schedule:
+    - cron: '0 6 * * *'
+  
+  # Allow running on push for testing
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-appimage.yml'
+      - 'build-scripts/**'
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      opentrack_version: ${{ steps.check.outputs.version }}
+      opentrack_tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - name: Check latest OpenTrack release
+        id: check
+        run: |
+          # Get latest OpenTrack release
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/opentrack/opentrack/releases/latest | jq -r '.tag_name')
+          echo "Latest OpenTrack release: $LATEST_RELEASE"
+          
+          # Check if we've already built this version
+          OUR_LATEST=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name' || echo "none")
+          echo "Our latest release: $OUR_LATEST"
+          
+          # Manual override
+          if [ "${{ github.event.inputs.opentrack_version }}" != "" ] && [ "${{ github.event.inputs.opentrack_version }}" != "latest" ]; then
+            LATEST_RELEASE="${{ github.event.inputs.opentrack_version }}"
+            echo "Manual override to: $LATEST_RELEASE"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          elif [ "$LATEST_RELEASE" != "$OUR_LATEST" ]; then
+            echo "New version detected!"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "Already built latest version"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "version=${LATEST_RELEASE#opentrack-}" >> $GITHUB_OUTPUT
+          echo "tag=$LATEST_RELEASE" >> $GITHUB_OUTPUT
+
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up build information
+        id: build_info
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          TAG="${{ needs.check-version.outputs.opentrack_tag }}"
+          
+          # Fallback for push events
+          if [ -z "$VERSION" ]; then
+            VERSION=$(curl -s https://api.github.com/repos/opentrack/opentrack/releases/latest | jq -r '.tag_name' | sed 's/opentrack-//')
+            TAG="opentrack-${VERSION}"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building OpenTrack $VERSION"
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils \
+            build-essential \
+            cmake \
+            git \
+            qtbase5-dev \
+            qttools5-dev \
+            libopencv-dev \
+            libprocps-dev \
+            wget \
+            file \
+            fuse \
+            libfuse2 \
+            desktop-file-utils \
+            zsync
+      
+      - name: Download and install ONNX Runtime
+        run: |
+          ONNX_VERSION="1.17.1"
+          wget -q https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-x64-${ONNX_VERSION}.tgz
+          tar xzf onnxruntime-linux-x64-${ONNX_VERSION}.tgz
+          sudo cp -r onnxruntime-linux-x64-${ONNX_VERSION}/include/* /usr/local/include/
+          sudo cp -r onnxruntime-linux-x64-${ONNX_VERSION}/lib/* /usr/local/lib/
+          sudo ldconfig
+          echo "ONNX Runtime installed:"
+          ls -la /usr/local/lib/libonnxruntime*
+      
+      - name: Clone and build OpenTrack
+        run: |
+          git clone --depth 1 --branch ${{ steps.build_info.outputs.tag }} https://github.com/opentrack/opentrack.git
+          cd opentrack
+          
+          mkdir build
+          cd build
+          
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DSDK_ENABLE_LIBEVDEV=OFF \
+            -D__otr_compile_flags_set=TRUE \
+            -DCMAKE_C_FLAGS="-ggdb -Wall -Wextra -Wpedantic" \
+            -DCMAKE_CXX_FLAGS="-ggdb -Wall -Wextra -Wpedantic -fpermissive" \
+            -DCMAKE_C_FLAGS_RELEASE="-O3 -DNDEBUG -march=x86-64-v2 -mtune=generic" \
+            -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -march=x86-64-v2 -mtune=generic" \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,x86-64-v2" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,x86-64-v2" \
+            -DCMAKE_MODULE_LINKER_FLAGS="-Wl,-z,x86-64-v2" \
+            -DCMAKE_EXE_LINKER_FLAGS_RELEASE="-Wl,-z,x86-64-v2" \
+            -DCMAKE_SHARED_LINKER_FLAGS_RELEASE="-Wl,-z,x86-64-v2" \
+            -DCMAKE_MODULE_LINKER_FLAGS_RELEASE="-Wl,-z,x86-64-v2" \
+            -DONNXRuntime_DIR=/usr/local
+          
+          make -j$(nproc)
+          
+          # Install to temporary directory
+          DESTDIR=$GITHUB_WORKSPACE/AppDir make install
+
+          # Some toolchains emit an overly strict GNU_PROPERTY_X86_ISA_1_NEEDED
+          # note (x86-64-v4) that causes Steam Deck to refuse to run.
+          # Removing this note restores compatibility.
+          objcopy --remove-section .note.gnu.property "$GITHUB_WORKSPACE/AppDir/usr/bin/opentrack" || true
+          if [ -d "$GITHUB_WORKSPACE/AppDir/usr/libexec/opentrack" ]; then
+            find "$GITHUB_WORKSPACE/AppDir/usr/libexec/opentrack" -type f -name '*.so' -print0 \
+              | xargs -0 -r -n 1 objcopy --remove-section .note.gnu.property || true
+          fi
+      
+      - name: Download linuxdeploy
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+      
+      - name: Prepare AppDir
+        run: |
+          # Ensure proper directory structure
+          mkdir -p AppDir/usr/lib
+          
+          # Copy ONNX Runtime libraries
+          cp -v /usr/local/lib/libonnxruntime.so* AppDir/usr/lib/
+
+          # OpenTrack's neuralnet tracker loads /usr/libexec/opentrack/onnxruntime.so,
+          # which expects libonnxruntime.so next to it via $ORIGIN.
+          mkdir -p AppDir/usr/libexec/opentrack
+          cp -v /usr/local/lib/libonnxruntime.so* AppDir/usr/libexec/opentrack/
+          
+          # Create desktop file if it doesn't exist
+          if [ ! -f AppDir/usr/share/applications/opentrack.desktop ]; then
+            mkdir -p AppDir/usr/share/applications
+            cat > AppDir/usr/share/applications/opentrack.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=OpenTrack
+          GenericName=Head Tracking
+          Comment=Head tracking software with neural network support
+          Exec=opentrack
+          Icon=opentrack
+          Categories=Utility;Game;
+          Terminal=false
+          EOF
+          fi
+          
+          # Find and copy icon
+          ICON_PATH=$(find AppDir -name "opentrack.png" -o -name "opentrack.svg" | head -1)
+          if [ -n "$ICON_PATH" ]; then
+            cp "$ICON_PATH" AppDir/
+          fi
+      
+      - name: Build AppImage
+        run: |
+          export VERSION="${{ steps.build_info.outputs.version }}"
+          
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --plugin qt \
+            --output appimage \
+            --desktop-file AppDir/usr/share/applications/opentrack.desktop \
+            --executable AppDir/usr/bin/opentrack
+          
+          # Rename to include version and neural net info
+          mv OpenTrack-*.AppImage OpenTrack-NeuralNet-${VERSION}-x86_64.AppImage
+      
+      - name: Test AppImage
+        run: |
+          ./OpenTrack-*.AppImage --version || true
+          file OpenTrack-*.AppImage
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenTrack-AppImage
+          path: OpenTrack-*.AppImage
+      
+      - name: Create Release
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: opentrack-${{ steps.build_info.outputs.version }}
+          name: OpenTrack ${{ steps.build_info.outputs.version }} (Neural Net CPU)
+          body: |
+            # OpenTrack AppImage with Neural Network Support (CPU)
+            
+            Built from [OpenTrack ${{ steps.build_info.outputs.tag }}](https://github.com/opentrack/opentrack/releases/tag/${{ steps.build_info.outputs.tag }})
+            
+            ## Features
+            - ✅ ONNX Runtime CPU support for neural network tracking
+            - ✅ All standard OpenTrack features
+            - ✅ Portable - runs on most Linux distributions
+            
+            ## Usage
+            ```bash
+            chmod +x OpenTrack-NeuralNet-${{ steps.build_info.outputs.version }}-x86_64.AppImage
+            ./OpenTrack-NeuralNet-${{ steps.build_info.outputs.version }}-x86_64.AppImage
+            ```
+            
+            ## System Requirements
+            - Linux x86_64
+            - Webcam or other video input device
+            - FUSE support (most distros have this by default)
+            
+            Built automatically on: ${{ github.run_id }}
+          files: OpenTrack-*.AppImage
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

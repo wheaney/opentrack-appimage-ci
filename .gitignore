@@ -1,0 +1,29 @@
+# Build artifacts
+*.AppImage
+AppDir/
+opentrack/
+onnxruntime-*/
+
+# linuxdeploy tools
+linuxdeploy*.AppImage
+
+# Build directories
+build/
+install/
+
+# Temporary files
+*.tar.gz
+*.tgz
+*.zip
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

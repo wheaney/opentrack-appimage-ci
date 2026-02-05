@@ -106,7 +106,7 @@ jobs:
   build:
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true' || github.event_name == 'push'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     
     steps:
       - name: Checkout repository
@@ -149,16 +149,11 @@ jobs:
             qt6-l10n-tools \
             qt6-tools-dev \
             qt6-tools-dev-tools \
-            libqt6core6 \
-            libqt6gui6 \
-            libqt6widgets6 \
             libqt6svg6-dev \
             libopencv-dev \
             libprocps-dev \
             wget \
             file \
-            fuse \
-            libfuse2 \
             desktop-file-utils \
             zsync
       
@@ -275,6 +270,8 @@ jobs:
       
       - name: Build AppImage
         run: |
+          # Avoid requiring FUSE on the runner when executing AppImages.
+          export APPIMAGE_EXTRACT_AND_RUN=1
           export VERSION="${{ steps.build_info.outputs.version }}"
 
           # Ensure linuxdeploy-plugin-qt uses Qt6's qmake.
@@ -296,6 +293,7 @@ jobs:
       
       - name: Test AppImage
         run: |
+          export APPIMAGE_EXTRACT_AND_RUN=1
           ./OpenTrack-*.AppImage --version || true
           file OpenTrack-*.AppImage
       

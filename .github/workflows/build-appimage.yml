@@ -137,6 +137,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DSDK_ENABLE_LIBEVDEV=OFF \
+            -DSDK_WINE=OFF \
+            -DSDK_XPLANE=OFF \
             -D__otr_compile_flags_set=TRUE \
             -DCMAKE_C_FLAGS="-ggdb -Wall -Wextra -Wpedantic" \
             -DCMAKE_CXX_FLAGS="-ggdb -Wall -Wextra -Wpedantic -fpermissive" \

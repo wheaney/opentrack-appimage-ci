@@ -237,6 +237,7 @@ jobs:
       
       - name: Prepare AppDir
         run: |
+          set -euo pipefail
           # Ensure proper directory structure
           mkdir -p AppDir/usr/lib
 
@@ -273,9 +274,26 @@ jobs:
           fi
           
           # Find and copy icon
-          ICON_PATH=$(find AppDir -name "opentrack.png" -o -name "opentrack.svg" | head -1)
+          ICON_PATH=""
+          # First try: icons installed into the AppDir
+          ICON_PATH="$(find AppDir/usr/share/icons AppDir/usr/share/pixmaps -type f \
+            \( -iname 'opentrack.png' -o -iname 'opentrack.svg' -o -iname 'opentrack*.png' -o -iname 'opentrack*.svg' \) \
+            2>/dev/null | head -n 1 || true)"
+
+          # Fallback: icon in the cloned OpenTrack source tree
+          if [ -z "$ICON_PATH" ] && [ -d opentrack ]; then
+            ICON_PATH="$(find opentrack -type f \
+              \( -iname 'opentrack.png' -o -iname 'opentrack.svg' -o -iname 'opentrack*.png' -o -iname 'opentrack*.svg' \) \
+              2>/dev/null | head -n 1 || true)"
+          fi
+
           if [ -n "$ICON_PATH" ]; then
-            cp "$ICON_PATH" AppDir/
+            ext="${ICON_PATH##*.}"
+            cp -v "$ICON_PATH" "AppDir/opentrack.${ext}"
+            ln -sf "opentrack.${ext}" AppDir/.DirIcon
+            echo "Using icon: $ICON_PATH"
+          else
+            echo "WARNING: Could not locate an opentrack icon in AppDir or source tree" >&2
           fi
       
       - name: Build AppImage
@@ -298,12 +316,20 @@ jobs:
           LINUXDEPLOY_LOG="$GITHUB_WORKSPACE/linuxdeploy.log"
           echo "Running linuxdeploy (logging to: $LINUXDEPLOY_LOG)"
 
+          icon_args=()
+          if [ -f AppDir/opentrack.png ]; then
+            icon_args+=( --icon-file AppDir/opentrack.png )
+          elif [ -f AppDir/opentrack.svg ]; then
+            icon_args+=( --icon-file AppDir/opentrack.svg )
+          fi
+
           if ! ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --plugin qt \
             --output appimage \
             --desktop-file AppDir/usr/share/applications/opentrack.desktop \
-            --executable AppDir/usr/bin/opentrack 2>&1 | tee "$LINUXDEPLOY_LOG"; then
+            --executable AppDir/usr/bin/opentrack \
+            "${icon_args[@]}" 2>&1 | tee "$LINUXDEPLOY_LOG"; then
             echo "" >&2
             echo "linuxdeploy failed. Last 200 log lines:" >&2
             tail -n 200 "$LINUXDEPLOY_LOG" >&2 || true

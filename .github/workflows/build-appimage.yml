@@ -143,6 +143,8 @@ jobs:
             libxcb1-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
+            patchelf \
+            squashfs-tools \
             qt6-base-dev \
             qt6-base-dev-tools \
             qt6-base-private-dev \
@@ -270,6 +272,7 @@ jobs:
       
       - name: Build AppImage
         run: |
+          set -euo pipefail
           # Avoid requiring FUSE on the runner when executing AppImages.
           export APPIMAGE_EXTRACT_AND_RUN=1
           export VERSION="${{ steps.build_info.outputs.version }}"
@@ -281,12 +284,24 @@ jobs:
             export QMAKE="$(command -v qt6-qmake)"
           fi
           
-          ./linuxdeploy-x86_64.AppImage \
+          LINUXDEPLOY_LOG="$GITHUB_WORKSPACE/linuxdeploy.log"
+          echo "Running linuxdeploy (logging to: $LINUXDEPLOY_LOG)"
+
+          if ! ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --plugin qt \
             --output appimage \
             --desktop-file AppDir/usr/share/applications/opentrack.desktop \
-            --executable AppDir/usr/bin/opentrack
+            --executable AppDir/usr/bin/opentrack 2>&1 | tee "$LINUXDEPLOY_LOG"; then
+            echo "" >&2
+            echo "linuxdeploy failed. Last 200 log lines:" >&2
+            tail -n 200 "$LINUXDEPLOY_LOG" >&2 || true
+            echo "" >&2
+            echo "Diagnostics:" >&2
+            command -v mksquashfs >&2 && mksquashfs -version 2>&1 | head -n 5 >&2 || true
+            command -v patchelf >&2 && patchelf --version 2>&1 | head -n 5 >&2 || true
+            exit 1
+          fi
           
           # Rename to include version and neural net info
           mv OpenTrack-*.AppImage OpenTrack-NeuralNet-${VERSION}-x86_64.AppImage

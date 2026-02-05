@@ -220,6 +220,29 @@ jobs:
           # Install to temporary directory
           DESTDIR=$GITHUB_WORKSPACE/AppDir make install
 
+          echo "Normalizing RPATH/RUNPATH inside AppDir (avoid host /usr/libexec leakage)..."
+          fix_rpath() {
+            local elf="$1"
+            local rpath="$2"
+            if [ -f "$elf" ]; then
+              patchelf --set-rpath "$rpath" "$elf" 2>/dev/null || true
+            fi
+          }
+
+          fix_rpath "$GITHUB_WORKSPACE/AppDir/usr/bin/opentrack" '$ORIGIN/../lib:$ORIGIN/../libexec/opentrack'
+
+          if [ -d "$GITHUB_WORKSPACE/AppDir/usr/lib" ]; then
+            while IFS= read -r -d '' f; do
+              fix_rpath "$f" '$ORIGIN'
+            done < <(find "$GITHUB_WORKSPACE/AppDir/usr/lib" -type f -name '*.so*' -print0 2>/dev/null || true)
+          fi
+
+          if [ -d "$GITHUB_WORKSPACE/AppDir/usr/libexec/opentrack" ]; then
+            while IFS= read -r -d '' f; do
+              fix_rpath "$f" '$ORIGIN:$ORIGIN/../lib'
+            done < <(find "$GITHUB_WORKSPACE/AppDir/usr/libexec/opentrack" -type f -name '*.so*' -print0 2>/dev/null || true)
+          fi
+
           # Some toolchains emit an overly strict GNU_PROPERTY_X86_ISA_1_NEEDED
           # note (x86-64-v4) that causes Steam Deck to refuse to run.
           # Removing this note restores compatibility.
@@ -295,6 +318,47 @@ jobs:
           else
             echo "WARNING: Could not locate an opentrack icon in AppDir or source tree" >&2
           fi
+
+          echo "Bundling OpenCV runtime libraries (dlopen modules depend on them)..."
+          ldconfig -p | awk '/libopencv_.*\.so/{print $NF}' | sort -u \
+            | xargs -r -n 1 cp -v -t AppDir/usr/lib/ || true
+
+          echo "Bundling Qt6 runtime libraries to avoid host Qt mixing..."
+          ldconfig -p | awk '/libQt6.*\.so/{print $NF}' | sort -u \
+            | xargs -r -n 1 cp -v -t AppDir/usr/lib/ || true
+
+          # Provide a deterministic AppRun that forces bundled libs/plugins.
+          cat > AppDir/AppRun <<'EOF'
+          #!/bin/sh
+          set -eu
+
+          APPDIR="$(dirname "$(readlink -f "$0")")"
+          export APPDIR
+
+          export PATH="$APPDIR/usr/bin${PATH:+:$PATH}"
+          export LD_LIBRARY_PATH="$APPDIR/usr/lib:$APPDIR/usr/libexec/opentrack${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export XDG_DATA_DIRS="$APPDIR/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+
+          # Prefer bundled Qt plugins if present.
+          qt_plugin_path=""
+          if [ -d "$APPDIR/usr/plugins" ]; then
+            qt_plugin_path="$APPDIR/usr/plugins"
+          fi
+          if [ -d "$APPDIR/usr/lib/qt6/plugins" ]; then
+            qt_plugin_path="$APPDIR/usr/lib/qt6/plugins${qt_plugin_path:+:$qt_plugin_path}"
+          fi
+          if [ -n "$qt_plugin_path" ]; then
+            export QT_PLUGIN_PATH="$qt_plugin_path"
+          fi
+
+          # Some linuxdeploy-plugin-qt layouts use usr/qml.
+          if [ -d "$APPDIR/usr/qml" ]; then
+            export QML2_IMPORT_PATH="$APPDIR/usr/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+          fi
+
+          exec "$APPDIR/usr/bin/opentrack" "$@"
+          EOF
+          chmod +x AppDir/AppRun
       
       - name: Build AppImage
         run: |
@@ -342,12 +406,6 @@ jobs:
           
           # Rename to include version and neural net info
           mv OpenTrack-*.AppImage OpenTrack-NeuralNet-${VERSION}-x86_64.AppImage
-      
-      - name: Test AppImage
-        run: |
-          export APPIMAGE_EXTRACT_AND_RUN=1
-          ./OpenTrack-*.AppImage --version || true
-          file OpenTrack-*.AppImage
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4

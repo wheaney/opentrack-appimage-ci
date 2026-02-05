@@ -88,8 +88,10 @@ jobs:
             build-essential \
             cmake \
             git \
-            qtbase5-dev \
-            qttools5-dev \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-tools-dev \
+            libqt6svg6-dev \
             libopencv-dev \
             libprocps-dev \
             wget \
@@ -193,6 +195,13 @@ jobs:
       - name: Build AppImage
         run: |
           export VERSION="${{ steps.build_info.outputs.version }}"
+
+          # Ensure linuxdeploy-plugin-qt uses Qt6's qmake.
+          if command -v qmake6 >/dev/null 2>&1; then
+            export QMAKE="$(command -v qmake6)"
+          elif command -v qt6-qmake >/dev/null 2>&1; then
+            export QMAKE="$(command -v qt6-qmake)"
+          fi
           
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \

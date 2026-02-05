@@ -185,6 +185,7 @@ jobs:
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
+            -DOPENTRACK_USERCONFIG=/dev/null \
             -DSDK_ENABLE_LIBEVDEV=OFF \
             -DSDK_WINE:BOOL=OFF \
             -DSDK_XPLANE:BOOL=OFF \

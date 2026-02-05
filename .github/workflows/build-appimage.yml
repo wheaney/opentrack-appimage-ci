@@ -88,11 +88,21 @@ jobs:
             build-essential \
             cmake \
             git \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             qt6-base-dev \
             qt6-base-dev-tools \
             qt6-l10n-tools \
             qt6-tools-dev \
             qt6-tools-dev-tools \
+            libqt6core6 \
+            libqt6gui6 \
+            libqt6widgets6 \
             libqt6svg6-dev \
             libopencv-dev \
             libprocps-dev \
@@ -105,7 +115,7 @@ jobs:
       
       - name: Download and install ONNX Runtime
         run: |
-          ONNX_VERSION="1.17.1"
+          ONNX_VERSION="1.23.2"
           wget -q https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-x64-${ONNX_VERSION}.tgz
           tar xzf onnxruntime-linux-x64-${ONNX_VERSION}.tgz
           sudo cp -r onnxruntime-linux-x64-${ONNX_VERSION}/include/* /usr/local/include/

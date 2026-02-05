@@ -31,12 +31,57 @@ jobs:
       - name: Check latest OpenTrack release
         id: check
         run: |
-          # Get latest OpenTrack release
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/opentrack/opentrack/releases/latest | jq -r '.tag_name')
+          set -euo pipefail
+
+          github_api_get() {
+            local url="$1"
+            local auth_args=()
+
+            # Prefer token to avoid rate limits.
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+              auth_args+=( -H "Authorization: Bearer ${GITHUB_TOKEN}" )
+            fi
+
+            curl -fsSL \
+              --retry 5 \
+              --retry-all-errors \
+              --retry-delay 2 \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'User-Agent: opentrack-appimage-ci' \
+              "${auth_args[@]}" \
+              "$url"
+          }
+
+          resolve_latest_tag() {
+            local repo="$1"
+            local url="https://api.github.com/repos/${repo}/releases/latest"
+            local json tag msg
+
+            json="$(github_api_get "$url")" || return 1
+            tag="$(printf '%s' "$json" | jq -r '.tag_name // empty')"
+
+            if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+              msg="$(printf '%s' "$json" | jq -r '.message // empty' 2>/dev/null || true)"
+              echo "ERROR: GitHub API returned an empty tag_name for ${repo}." >&2
+              if [ -n "$msg" ]; then
+                echo "GitHub API message: $msg" >&2
+              fi
+              echo "Tip: ensure jq is available and consider setting GITHUB_TOKEN to avoid rate limits." >&2
+              return 2
+            fi
+
+            printf '%s\n' "$tag"
+          }
+
+          # Get latest OpenTrack release tag (retry + fail-fast on null)
+          LATEST_RELEASE="$(resolve_latest_tag opentrack/opentrack)"
           echo "Latest OpenTrack release: $LATEST_RELEASE"
           
           # Check if we've already built this version
-          OUR_LATEST=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name' || echo "none")
+          OUR_LATEST="$(github_api_get "https://api.github.com/repos/${{ github.repository }}/releases/latest" 2>/dev/null | jq -r '.tag_name // empty' || true)"
+          if [ -z "$OUR_LATEST" ] || [ "$OUR_LATEST" = "null" ]; then
+            OUR_LATEST="none"
+          fi
           echo "Our latest release: $OUR_LATEST"
           
           # Manual override
@@ -54,6 +99,9 @@ jobs:
           
           echo "version=${LATEST_RELEASE#opentrack-}" >> $GITHUB_OUTPUT
           echo "tag=$LATEST_RELEASE" >> $GITHUB_OUTPUT
+        env:
+          # GitHub automatically provides this in Actions; used for higher API rate limits.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
     needs: check-version
@@ -127,6 +175,7 @@ jobs:
       
       - name: Clone and build OpenTrack
         run: |
+          set -euo pipefail
           git clone --depth 1 --branch ${{ steps.build_info.outputs.tag }} https://github.com/opentrack/opentrack.git
           cd opentrack
           
@@ -137,8 +186,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DSDK_ENABLE_LIBEVDEV=OFF \
-            -DSDK_WINE=OFF \
-            -DSDK_XPLANE=OFF \
+            -DSDK_WINE:BOOL=OFF \
+            -DSDK_XPLANE:BOOL=OFF \
             -D__otr_compile_flags_set=TRUE \
             -DCMAKE_C_FLAGS="-ggdb -Wall -Wextra -Wpedantic" \
             -DCMAKE_CXX_FLAGS="-ggdb -Wall -Wextra -Wpedantic -fpermissive" \
@@ -151,6 +200,22 @@ jobs:
             -DCMAKE_SHARED_LINKER_FLAGS_RELEASE="-Wl,-z,x86-64-v2" \
             -DCMAKE_MODULE_LINKER_FLAGS_RELEASE="-Wl,-z,x86-64-v2" \
             -DONNXRuntime_DIR=/usr/local
+
+          echo "CMake cache SDK values:";
+          grep -E '^SDK_(WINE|XPLANE):' CMakeCache.txt || true
+
+          sdk_wine_val="$(grep -E '^SDK_WINE:' CMakeCache.txt | head -n1 | cut -d= -f2- | tr -d '\r')"
+          case "$sdk_wine_val" in
+            ''|0|OFF|FALSE|N|NO)
+              :
+              ;;
+            *)
+              echo "ERROR: SDK_WINE resolved to '$sdk_wine_val' in CMakeCache.txt; wineg++ would be required." >&2
+              echo "Dumping related cache lines:" >&2
+              grep -nE 'SDK_WINE|SDK_XPLANE|proto-wine|WINE' CMakeCache.txt || true
+              exit 1
+              ;;
+          esac
           
           make -j$(nproc)
           

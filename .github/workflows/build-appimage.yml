@@ -239,6 +239,14 @@ jobs:
         run: |
           # Ensure proper directory structure
           mkdir -p AppDir/usr/lib
+
+          # linuxdeploy resolves DT_NEEDED via standard library paths.
+          # OpenTrack installs several private modules under usr/libexec/opentrack
+          # which the main binary depends on. To help linuxdeploy find them, also
+          # copy them into usr/lib (keep the originals in libexec).
+          if [ -d AppDir/usr/libexec/opentrack ]; then
+            cp -v AppDir/usr/libexec/opentrack/*.so* AppDir/usr/lib/ || true
+          fi
           
           # Copy ONNX Runtime libraries
           cp -v /usr/local/lib/libonnxruntime.so* AppDir/usr/lib/
@@ -276,6 +284,9 @@ jobs:
           # Avoid requiring FUSE on the runner when executing AppImages.
           export APPIMAGE_EXTRACT_AND_RUN=1
           export VERSION="${{ steps.build_info.outputs.version }}"
+
+          # Help linuxdeploy resolve OpenTrack's private modules.
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/AppDir/usr/lib:$GITHUB_WORKSPACE/AppDir/usr/libexec/opentrack${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
           # Ensure linuxdeploy-plugin-qt uses Qt6's qmake.
           if command -v qmake6 >/dev/null 2>&1; then

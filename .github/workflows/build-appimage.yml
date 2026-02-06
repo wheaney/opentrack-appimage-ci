@@ -189,8 +189,23 @@ jobs:
           wget -q "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/${PKG}.tgz"
           tar xzf "${PKG}.tgz"
 
-          sudo cp -r "${PKG}/include/"* /usr/local/include/
-          sudo cp -r "${PKG}/lib/"* /usr/local/lib/
+          # The extracted directory name doesn't always exactly match $PKG.
+          # It will, however, start with onnxruntime-linux-*.
+          ORT_DIR=""
+          for d in onnxruntime-linux-*; do
+            if [ -d "$d" ] && [ -d "$d/include" ] && [ -d "$d/lib" ]; then
+              ORT_DIR="$d"
+              break
+            fi
+          done
+          if [ -z "$ORT_DIR" ]; then
+            echo "ERROR: Could not locate extracted ONNX Runtime directory (onnxruntime-linux-*)." >&2
+            ls -la >&2 || true
+            exit 1
+          fi
+
+          sudo cp -r "${ORT_DIR}/include/"* /usr/local/include/
+          sudo cp -r "${ORT_DIR}/lib/"* /usr/local/lib/
           sudo ldconfig
           echo "ONNX Runtime installed:"
           ls -la /usr/local/lib/libonnxruntime*

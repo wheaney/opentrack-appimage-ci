@@ -588,25 +588,38 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Create Release (all flavors)
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: opentrack-${{ needs.check-version.outputs.opentrack_version }}
-          name: OpenTrack ${{ needs.check-version.outputs.opentrack_version }} (AppImages)
-          body: |
-            # OpenTrack AppImages
-
-            Built from OpenTrack tag `${{ needs.check-version.outputs.opentrack_tag }}`.
-
-            ## Flavors
-            - `NoONNX`: OpenTrack without ONNX Runtime bundled
-            - `ONNX-CPU`: ONNX Runtime CPU bundled for neuralnet tracker
-            - `ONNX-GPU`: ONNX Runtime GPU bundled (requires system CUDA/NVIDIA runtime)
-
-            ## Notes
-            - `ONNX-GPU` may require additional CUDA runtime libraries on the target system.
-          files: dist/*.AppImage
-          draft: false
-          prerelease: false
+      - name: Create or update Release (idempotent)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="opentrack-${{ needs.check-version.outputs.opentrack_version }}"
+          TITLE="OpenTrack ${{ needs.check-version.outputs.opentrack_version }} (AppImages)"
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+
+          cat > "$NOTES_FILE" <<'EOF'
+          # OpenTrack AppImages
+
+          Built from OpenTrack tag `${{ needs.check-version.outputs.opentrack_tag }}`.
+
+          ## Flavors
+          - `NoONNX`: OpenTrack without ONNX Runtime bundled
+          - `ONNX-CPU`: ONNX Runtime CPU bundled for neuralnet tracker
+          - `ONNX-GPU`: ONNX Runtime GPU bundled (requires system CUDA/NVIDIA runtime)
+
+          ## Notes
+          - `ONNX-GPU` may require additional CUDA runtime libraries on the target system.
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; updating title/notes."
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          else
+            echo "Creating new release $TAG."
+            gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE" --target "$GITHUB_SHA"
+          fi
+
+          echo "Uploading artifacts to $TAG (clobber if they already exist)..."
+          ls -la dist || true
+          gh release upload "$TAG" dist/*.AppImage --clobber

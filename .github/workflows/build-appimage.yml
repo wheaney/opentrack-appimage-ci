@@ -120,7 +120,7 @@ jobs:
             artifact_suffix: ONNX-GPU-CUDA
             onnx_variant: gpu_cuda13
             # CUDA-specific ONNX Runtime build (CUDA 13.x series)
-            onnx_pkg: onnxruntime-linux-x64-gpu-cuda13
+            onnx_pkg: onnxruntime-linux-x64-gpu_cuda13
             allow_fail: true
     continue-on-error: ${{ matrix.allow_fail }}
     name: Build (${{ matrix.flavor }})

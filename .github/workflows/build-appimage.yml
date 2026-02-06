@@ -181,7 +181,7 @@ jobs:
       - name: Download and install ONNX Runtime
         if: matrix.onnx_variant != 'none'
         run: |
-          ONNX_VERSION="1.23.2"
+          ONNX_VERSION="1.24.1"
 
           PKG_BASE="${{ matrix.onnx_pkg }}"
           PKG="${PKG_BASE}-${ONNX_VERSION}"

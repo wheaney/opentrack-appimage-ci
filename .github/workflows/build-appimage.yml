@@ -468,12 +468,30 @@ jobs:
             icon_args+=( --icon-file AppDir/opentrack.svg )
           fi
 
+          exclude_args=()
+          if [ "${{ matrix.onnx_variant }}" = "gpu" ]; then
+            # GitHub-hosted runners do not ship CUDA/TensorRT runtime libs.
+            # Exclude them from deployment so linuxdeploy can still produce an AppImage.
+            # The resulting AppImage will require these libs to be available on the target system.
+            exclude_args+=( --exclude-library 'libcuda.so*' )
+            exclude_args+=( --exclude-library 'libcudart.so*' )
+            exclude_args+=( --exclude-library 'libcublas.so*' )
+            exclude_args+=( --exclude-library 'libcublasLt.so*' )
+            exclude_args+=( --exclude-library 'libcufft.so*' )
+            exclude_args+=( --exclude-library 'libcurand.so*' )
+            exclude_args+=( --exclude-library 'libcudnn.so*' )
+            exclude_args+=( --exclude-library 'libnvinfer.so*' )
+            exclude_args+=( --exclude-library 'libnvonnxparser.so*' )
+            exclude_args+=( --exclude-library 'libnvidia-ml.so*' )
+          fi
+
           if ! ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --plugin qt \
             --output appimage \
             --desktop-file AppDir/usr/share/applications/opentrack.desktop \
             --executable AppDir/usr/bin/opentrack \
+            "${exclude_args[@]}" \
             "${icon_args[@]}" 2>&1 | tee "$LINUXDEPLOY_LOG"; then
             echo "" >&2
             echo "linuxdeploy failed. Last 200 log lines:" >&2
@@ -496,7 +514,7 @@ jobs:
 
   release:
     needs: [check-version, build]
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Download build artifacts

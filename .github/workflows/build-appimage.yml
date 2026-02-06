@@ -375,6 +375,19 @@ jobs:
           ldconfig -p | awk '/libQt6.*\.so/{print $NF}' | sort -u \
             | xargs -r -n 1 cp -v -t AppDir/usr/lib/ || true
 
+          echo "Bundling OpenGL (GLVND) dispatcher libraries for portability..."
+          # Some minimal Ubuntu installs don't include libopengl0 by default.
+          # Bundling these dispatch libs is generally safe: they still use the host
+          # vendor GL implementation underneath (NVIDIA/Mesa) via GLVND.
+          ldconfig -p | awk '/\/libOpenGL\.so\.0$/{print $NF}' | head -n 1 \
+            | xargs -r -n 1 cp -v -t AppDir/usr/lib/ || true
+          ldconfig -p | awk '/\/libGLX\.so\.0$/{print $NF}' | head -n 1 \
+            | xargs -r -n 1 cp -v -t AppDir/usr/lib/ || true
+          ldconfig -p | awk '/\/libGLdispatch\.so\.0$/{print $NF}' | head -n 1 \
+            | xargs -r -n 1 cp -v -t AppDir/usr/lib/ || true
+          ldconfig -p | awk '/\/libEGL\.so\.1$/{print $NF}' | head -n 1 \
+            | xargs -r -n 1 cp -v -t AppDir/usr/lib/ || true
+
           # Provide a deterministic AppRun that forces bundled libs/plugins.
           cat > AppDir/AppRun <<'EOF'
           #!/bin/sh
@@ -518,7 +531,7 @@ jobs:
 
   release:
     needs: [check-version, build]
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write

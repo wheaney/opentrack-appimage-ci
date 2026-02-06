@@ -20,7 +20,7 @@ You'll find three different flavors:
 
 - **NoONNX**: OpenTrack without NeuralNet (no ONNX Runtime bundled)
 - **ONNX-CPU**: OpenTrack with NeuralNet (ONNX Runtime CPU bundled)
-- **ONNX-GPU**: *Currently unavailable* - OpenTrack with GPU-based NeuralNet processing (ONNX Runtime GPU bundled; requires CUDA/NVIDIA runtime libraries on the target system)
+- **ONNX-GPU**: OpenTrack with GPU-based NeuralNet processing (ONNX Runtime GPU bundled; requires CUDA/NVIDIA runtime libraries on the target system). This flavor may be missing from a given release if the GPU packaging step fails in CI.
 
 ### Run
 ```bash

@@ -603,9 +603,11 @@ jobs:
       - name: Create or update Release (idempotent)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
+          REPO="$GH_REPO"
           TAG="opentrack-${{ needs.check-version.outputs.opentrack_version }}"
           TITLE="OpenTrack ${{ needs.check-version.outputs.opentrack_version }} (AppImages)"
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
@@ -624,14 +626,14 @@ jobs:
           - `ONNX-GPU` may require additional CUDA runtime libraries on the target system.
           EOF
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "Release $TAG already exists; updating title/notes."
-            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+            gh release edit "$TAG" --repo "$REPO" --title "$TITLE" --notes-file "$NOTES_FILE"
           else
             echo "Creating new release $TAG."
-            gh release create "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE" --target "$GITHUB_SHA"
+            gh release create "$TAG" --repo "$REPO" --title "$TITLE" --notes-file "$NOTES_FILE" --target "$GITHUB_SHA"
           fi
 
           echo "Uploading artifacts to $TAG (clobber if they already exist)..."
           ls -la dist || true
-          gh release upload "$TAG" dist/*.AppImage --clobber
+          gh release upload "$TAG" --repo "$REPO" dist/*.AppImage --clobber

@@ -98,35 +98,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        onnx_variant: [none, cpu, gpu, gpu_cuda13]
         include:
-          - onnx_variant: none
-            flavor: no-onnx
+          - flavor: no-onnx
             artifact_suffix: NoONNX
+            onnx_variant: none
             onnx_pkg: ''
             allow_fail: false
-          - onnx_variant: cpu
-            flavor: onnx-cpu
+          - flavor: onnx-cpu
             artifact_suffix: ONNX-CPU
+            onnx_variant: cpu
             onnx_pkg: onnxruntime-linux-x64
             allow_fail: false
-          - onnx_variant: gpu
-            flavor: onnx-gpu
+          - flavor: onnx-gpu
             artifact_suffix: ONNX-GPU
+            onnx_variant: gpu
             onnx_pkg: onnxruntime-linux-x64-gpu
             # GPU builds often require CUDA runtime libs present at build/package time.
             # Keep the pipeline green while iterating on CUDA deps.
             allow_fail: true
-          - onnx_variant: gpu_cuda13
-            flavor: onnx-gpu-cuda
-            artifact_suffix: ONNX-GPU-CUDA
-            # CUDA-specific ONNX Runtime build (CUDA 13.x series)
-            onnx_pkg: onnxruntime-linux-x64-gpu_cuda13
-            allow_fail: true
-        # Keep the CUDA-specific variant defined above for easy re-enable later,
-        # but skip it for now.
-        exclude:
-          - onnx_variant: gpu_cuda13
+          # This CUDA-specific ONNX Runtime build is currently not available on v1.23.2
+          # - flavor: onnx-gpu-cuda
+          #   artifact_suffix: ONNX-GPU-CUDA
+          #   onnx_variant: gpu_cuda13
+          #   # CUDA-specific ONNX Runtime build (CUDA 13.x series)
+          #   onnx_pkg: onnxruntime-linux-x64-gpu_cuda13
+          #   allow_fail: true
     continue-on-error: ${{ matrix.allow_fail }}
     name: Build (${{ matrix.flavor }})
     

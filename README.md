@@ -1,12 +1,12 @@
-# OpenTrack Neural Net AppImage Builder
+# OpenTrack AppImage Builder
 
-Automated builds of [OpenTrack](https://github.com/opentrack/opentrack) with ONNX Runtime (CPU) neural network support, packaged as portable AppImages for Linux.
+Automated builds of [OpenTrack](https://github.com/opentrack/opentrack) packaged as portable AppImages for Linux, with optional ONNX Runtime (CPU/GPU) support for the neuralnet tracker.
 
 ## 🎯 What is this?
 
 This repository automatically monitors OpenTrack releases and builds AppImage packages that include:
 - Full OpenTrack functionality
-- ONNX Runtime for neural network-based head tracking
+- Optional ONNX Runtime for neural network-based head tracking (neuralnet tracker)
 - All dependencies bundled (no installation required)
 - Works across most Linux distributions
 
@@ -17,11 +17,11 @@ Get the latest build from the [Releases](../../releases) page.
 ## 🚀 Quick Start
 
 ```bash
-# Download the AppImage from Releases
-chmod +x OpenTrack-NeuralNet-*-x86_64.AppImage
+# Download one of the AppImages from Releases
+chmod +x OpenTrack-*-x86_64.AppImage
 
-# Run it!
-./OpenTrack-NeuralNet-*-x86_64.AppImage
+# Run it
+./OpenTrack-*-x86_64.AppImage
 ```
 
 No installation needed. The AppImage contains everything required to run OpenTrack with neural network support.
@@ -31,9 +31,17 @@ No installation needed. The AppImage contains everything required to run OpenTra
 The GitHub Actions workflow:
 1. **Checks daily** for new OpenTrack releases
 2. **Builds automatically** when a new version is detected
-3. **Compiles OpenTrack** with ONNX Runtime CPU support
-4. **Bundles dependencies** using linuxdeploy
-5. **Creates AppImage** and publishes as a GitHub Release
+3. **Builds multiple flavors** in a matrix
+4. **Bundles dependencies** using linuxdeploy + linuxdeploy-plugin-qt
+5. **Creates AppImages** and publishes them as a GitHub Release
+
+### Output flavors
+
+Each run produces up to three AppImages:
+
+- **NoONNX**: OpenTrack without ONNX Runtime bundled
+- **ONNX-CPU**: ONNX Runtime CPU bundled for neuralnet
+- **ONNX-GPU**: ONNX Runtime GPU bundled (requires CUDA/NVIDIA runtime libraries on the target system)
 
 ## 🛠️ Manual Build Trigger
 
@@ -47,7 +55,7 @@ You can manually trigger a build for a specific OpenTrack version:
 ## 📋 System Requirements
 
 - **OS**: Linux x86_64 (any modern distribution)
-- **FUSE**: Required for AppImage support (pre-installed on most distros)
+- **FUSE**: Typically required to run AppImages. If unavailable, you can often run with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Webcam**: Or other video input device for head tracking
 
 ## ❓ FAQ
@@ -62,9 +70,7 @@ AppImages are portable, self-contained applications that run on any Linux distri
 
 ### CPU vs GPU?
 
-This build uses **CPU-only** ONNX Runtime, which works universally across all systems. GPU builds require specific CUDA versions and drivers, making them less portable.
-
-CPU performance is sufficient for real-time head tracking on most modern processors.
+`ONNX-CPU` is the most portable option. `ONNX-GPU` depends on CUDA/TensorRT libraries (e.g. `libcudart`, `libcublas`, `libcudnn`, etc.) being available on the target machine, so it is less portable.
 
 ### What's the difference from official OpenTrack?
 
@@ -72,19 +78,7 @@ Official OpenTrack releases may not include neural network support or ONNX Runti
 
 ## 🔧 Building Locally
 
-If you want to build on your own machine:
-
-```bash
-# Install dependencies
-sudo apt-get install build-essential cmake git qtbase5-dev qttools5-dev libopencv-dev
-
-# Clone this repo
-git clone https://github.com/YOUR_USERNAME/opentrack-neuralnet-appimage.git
-cd opentrack-neuralnet-appimage
-
-# The workflow file contains all build steps
-# You can extract and run them locally
-```
+The canonical build instructions live in the GitHub Actions workflow: [.github/workflows/build-appimage.yml](.github/workflows/build-appimage.yml). If you want to run it locally, mirror the steps from that workflow on an Ubuntu 24.04 environment.
 
 ## 📝 License
 

@@ -28,7 +28,6 @@ jobs:
   check-version:
     runs-on: ubuntu-latest
     outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
       opentrack_version: ${{ steps.check.outputs.version }}
       opentrack_tag: ${{ steps.check.outputs.tag }}
     steps:
@@ -80,25 +79,11 @@ jobs:
           # Get latest OpenTrack release tag (retry + fail-fast on null)
           LATEST_RELEASE="$(resolve_latest_tag opentrack/opentrack)"
           echo "Latest OpenTrack release: $LATEST_RELEASE"
-          
-          # Check if we've already built this version
-          OUR_LATEST="$(github_api_get "https://api.github.com/repos/${{ github.repository }}/releases/latest" 2>/dev/null | jq -r '.tag_name // empty' || true)"
-          if [ -z "$OUR_LATEST" ] || [ "$OUR_LATEST" = "null" ]; then
-            OUR_LATEST="none"
-          fi
-          echo "Our latest release: $OUR_LATEST"
-          
+
           # Manual override
           if [ "${{ github.event.inputs.opentrack_version }}" != "" ] && [ "${{ github.event.inputs.opentrack_version }}" != "latest" ]; then
             LATEST_RELEASE="${{ github.event.inputs.opentrack_version }}"
             echo "Manual override to: $LATEST_RELEASE"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          elif [ "$LATEST_RELEASE" != "$OUR_LATEST" ]; then
-            echo "New version detected!"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          else
-            echo "Already built latest version"
-            echo "should_build=false" >> $GITHUB_OUTPUT
           fi
           
           echo "version=${LATEST_RELEASE#opentrack-}" >> $GITHUB_OUTPUT
@@ -109,7 +94,6 @@ jobs:
 
   build:
     needs: check-version
-    if: needs.check-version.outputs.should_build == 'true' || github.event_name == 'push'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -608,7 +592,8 @@ jobs:
           set -euo pipefail
 
           REPO="$GH_REPO"
-          TAG="opentrack-${{ needs.check-version.outputs.opentrack_version }}"
+          TS="$(date -u +%Y%m%d-%H%M%SZ)"
+          TAG="opentrack-${{ needs.check-version.outputs.opentrack_version }}-${TS}"
           TITLE="OpenTrack ${{ needs.check-version.outputs.opentrack_version }} (AppImages)"
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
 
@@ -618,9 +603,9 @@ jobs:
           Built from OpenTrack tag `${{ needs.check-version.outputs.opentrack_tag }}`.
 
           ## Flavors
-          - `NoONNX`: OpenTrack without ONNX Runtime bundled
-          - `ONNX-CPU`: ONNX Runtime CPU bundled for neuralnet tracker
-          - `ONNX-GPU`: ONNX Runtime GPU bundled (requires system CUDA/NVIDIA runtime)
+          - `NoONNX`: OpenTrack without NeuralNet (no ONNX Runtime bundled)
+          - `ONNX-CPU`: OpenTrack with NeuralNet (ONNX Runtime CPU bundled)
+          - `ONNX-GPU`: OpenTrack with GPU-based NeuralNet processing (ONNX Runtime GPU bundled; requires CUDA/NVIDIA runtime libraries on the target system)
 
           ## Notes
           - `ONNX-GPU` may require additional CUDA runtime libraries on the target system.

@@ -107,6 +107,26 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true' || github.event_name == 'push'
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: no-onnx
+            artifact_suffix: NoONNX
+            onnx_variant: none
+            allow_fail: false
+          - flavor: onnx-cpu
+            artifact_suffix: ONNX-CPU
+            onnx_variant: cpu
+            allow_fail: false
+          - flavor: onnx-gpu
+            artifact_suffix: ONNX-GPU
+            onnx_variant: gpu
+            # GPU builds often require CUDA runtime libs present at build/package time.
+            # Keep the pipeline green while iterating on CUDA deps.
+            allow_fail: true
+    continue-on-error: ${{ matrix.allow_fail }}
+    name: Build (${{ matrix.flavor }})
     
     steps:
       - name: Checkout repository
@@ -115,7 +135,7 @@ jobs:
       - name: Set up build information
         id: build_info
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
+          VERSION="${{ needs.check-version.outputs.opentrack_version }}"
           TAG="${{ needs.check-version.outputs.opentrack_tag }}"
           
           # Fallback for push events
@@ -162,12 +182,21 @@ jobs:
             zsync
       
       - name: Download and install ONNX Runtime
+        if: matrix.onnx_variant != 'none'
         run: |
           ONNX_VERSION="1.23.2"
-          wget -q https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-x64-${ONNX_VERSION}.tgz
-          tar xzf onnxruntime-linux-x64-${ONNX_VERSION}.tgz
-          sudo cp -r onnxruntime-linux-x64-${ONNX_VERSION}/include/* /usr/local/include/
-          sudo cp -r onnxruntime-linux-x64-${ONNX_VERSION}/lib/* /usr/local/lib/
+
+          PKG="onnxruntime-linux-x64-${ONNX_VERSION}"
+          if [ "${{ matrix.onnx_variant }}" = "gpu" ]; then
+            # Note: this archive typically depends on system CUDA runtime libs.
+            PKG="onnxruntime-linux-x64-gpu-${ONNX_VERSION}"
+          fi
+
+          wget -q "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/${PKG}.tgz"
+          tar xzf "${PKG}.tgz"
+
+          sudo cp -r "${PKG}/include/"* /usr/local/include/
+          sudo cp -r "${PKG}/lib/"* /usr/local/lib/
           sudo ldconfig
           echo "ONNX Runtime installed:"
           ls -la /usr/local/lib/libonnxruntime*
@@ -180,26 +209,32 @@ jobs:
           
           mkdir build
           cd build
-          
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DOPENTRACK_USERCONFIG=/dev/null \
-            -DSDK_ENABLE_LIBEVDEV=OFF \
-            -DSDK_WINE:BOOL=OFF \
-            -DSDK_XPLANE:BOOL=OFF \
-            -D__otr_compile_flags_set=TRUE \
-            -DCMAKE_C_FLAGS="-ggdb -Wall -Wextra -Wpedantic" \
-            -DCMAKE_CXX_FLAGS="-ggdb -Wall -Wextra -Wpedantic -fpermissive" \
-            -DCMAKE_C_FLAGS_RELEASE="-O3 -DNDEBUG -march=x86-64-v2 -mtune=generic" \
-            -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -march=x86-64-v2 -mtune=generic" \
-            -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,x86-64-v2" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,x86-64-v2" \
-            -DCMAKE_MODULE_LINKER_FLAGS="-Wl,-z,x86-64-v2" \
-            -DCMAKE_EXE_LINKER_FLAGS_RELEASE="-Wl,-z,x86-64-v2" \
-            -DCMAKE_SHARED_LINKER_FLAGS_RELEASE="-Wl,-z,x86-64-v2" \
-            -DCMAKE_MODULE_LINKER_FLAGS_RELEASE="-Wl,-z,x86-64-v2" \
-            -DONNXRuntime_DIR=/usr/local
+
+          cmake_args=(
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_INSTALL_PREFIX=/usr
+            -DOPENTRACK_USERCONFIG=/dev/null
+            -DSDK_ENABLE_LIBEVDEV=OFF
+            -DSDK_WINE:BOOL=OFF
+            -DSDK_XPLANE:BOOL=OFF
+            -D__otr_compile_flags_set=TRUE
+            -DCMAKE_C_FLAGS="-ggdb -Wall -Wextra -Wpedantic"
+            -DCMAKE_CXX_FLAGS="-ggdb -Wall -Wextra -Wpedantic -fpermissive"
+            -DCMAKE_C_FLAGS_RELEASE="-O3 -DNDEBUG -march=x86-64-v2 -mtune=generic"
+            -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -march=x86-64-v2 -mtune=generic"
+            -DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,x86-64-v2
+            -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,x86-64-v2
+            -DCMAKE_MODULE_LINKER_FLAGS=-Wl,-z,x86-64-v2
+            -DCMAKE_EXE_LINKER_FLAGS_RELEASE=-Wl,-z,x86-64-v2
+            -DCMAKE_SHARED_LINKER_FLAGS_RELEASE=-Wl,-z,x86-64-v2
+            -DCMAKE_MODULE_LINKER_FLAGS_RELEASE=-Wl,-z,x86-64-v2
+          )
+
+          if [ "${{ matrix.onnx_variant }}" != "none" ]; then
+            cmake_args+=( -DONNXRuntime_DIR=/usr/local )
+          fi
+
+          cmake .. "${cmake_args[@]}"
 
           echo "CMake cache SDK values:";
           grep -E '^SDK_(WINE|XPLANE):' CMakeCache.txt || true
@@ -273,14 +308,21 @@ jobs:
           if [ -d AppDir/usr/libexec/opentrack ]; then
             cp -v AppDir/usr/libexec/opentrack/*.so* AppDir/usr/lib/ || true
           fi
-          
-          # Copy ONNX Runtime libraries
-          cp -v /usr/local/lib/libonnxruntime.so* AppDir/usr/lib/
 
-          # OpenTrack's neuralnet tracker loads /usr/libexec/opentrack/onnxruntime.so,
-          # which expects libonnxruntime.so next to it via $ORIGIN.
-          mkdir -p AppDir/usr/libexec/opentrack
-          cp -v /usr/local/lib/libonnxruntime.so* AppDir/usr/libexec/opentrack/
+          if [ "${{ matrix.onnx_variant }}" != "none" ]; then
+            # Copy ONNX Runtime libraries
+            cp -v /usr/local/lib/libonnxruntime.so* AppDir/usr/lib/
+
+            # OpenTrack's neuralnet tracker loads /usr/libexec/opentrack/onnxruntime.so,
+            # which expects libonnxruntime.so next to it via $ORIGIN.
+            mkdir -p AppDir/usr/libexec/opentrack
+            cp -v /usr/local/lib/libonnxruntime.so* AppDir/usr/libexec/opentrack/
+
+            # GPU builds commonly include extra ONNX Runtime provider libs.
+            # Copy them when present.
+            cp -v /usr/local/lib/libonnxruntime_providers_*.so* AppDir/usr/lib/ 2>/dev/null || true
+            cp -v /usr/local/lib/libonnxruntime_providers_*.so* AppDir/usr/libexec/opentrack/ 2>/dev/null || true
+          fi
           
           # Create desktop file if it doesn't exist
           if [ ! -f AppDir/usr/share/applications/opentrack.desktop ]; then
@@ -361,6 +403,40 @@ jobs:
           exec "$APPDIR/usr/bin/opentrack" "$@"
           EOF
           chmod +x AppDir/AppRun
+
+      - name: GPU diagnostics (CUDA deps)
+        if: matrix.onnx_variant == 'gpu'
+        run: |
+          set -euo pipefail
+          echo "=== ONNX Runtime GPU diagnostics ==="
+          echo "Host libs in /usr/local/lib:" 
+          ls -la /usr/local/lib/libonnxruntime*.so* || true
+          echo
+
+          echo "Provider libs (host):"
+          ls -la /usr/local/lib/libonnxruntime_providers_*.so* 2>/dev/null || true
+          echo
+
+          for f in /usr/local/lib/libonnxruntime_providers_*.so*; do
+            [ -e "$f" ] || continue
+            echo "--- ldd: $f ---"
+            ldd "$f" || true
+            echo
+          done
+
+          echo "Provider libs (AppDir):"
+          ls -la AppDir/usr/lib/libonnxruntime_providers_*.so* 2>/dev/null || true
+          ls -la AppDir/usr/libexec/opentrack/libonnxruntime_providers_*.so* 2>/dev/null || true
+          echo
+
+          for f in AppDir/usr/lib/libonnxruntime_providers_*.so* AppDir/usr/libexec/opentrack/libonnxruntime_providers_*.so*; do
+            [ -e "$f" ] || continue
+            echo "--- ldd: $f ---"
+            ldd "$f" || true
+            echo
+          done
+
+          echo "If you see 'not found' above, the runner is missing CUDA/NVIDIA runtime libs (e.g. libcuda.so, libcudart.so, libcublas.so, libnvinfer.so)."
       
       - name: Build AppImage
         run: |
@@ -409,44 +485,45 @@ jobs:
             exit 1
           fi
           
-          # Rename to include version and neural net info
-          mv OpenTrack-*.AppImage OpenTrack-NeuralNet-${VERSION}-x86_64.AppImage
+          # Rename to include flavor + version
+          mv OpenTrack-*.AppImage OpenTrack-${{ matrix.artifact_suffix }}-${VERSION}-x86_64.AppImage
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenTrack-AppImage
-          path: OpenTrack-*.AppImage
-      
-      - name: Create Release
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+          name: OpenTrack-${{ matrix.artifact_suffix }}
+          path: OpenTrack-${{ matrix.artifact_suffix }}-*.AppImage
+
+  release:
+    needs: [check-version, build]
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: OpenTrack-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create Release (all flavors)
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: opentrack-${{ steps.build_info.outputs.version }}
-          name: OpenTrack ${{ steps.build_info.outputs.version }} (Neural Net CPU)
+          tag_name: opentrack-${{ needs.check-version.outputs.opentrack_version }}
+          name: OpenTrack ${{ needs.check-version.outputs.opentrack_version }} (AppImages)
           body: |
-            # OpenTrack AppImage with Neural Network Support (CPU)
-            
-            Built from [OpenTrack ${{ steps.build_info.outputs.tag }}](https://github.com/opentrack/opentrack/releases/tag/${{ steps.build_info.outputs.tag }})
-            
-            ## Features
-            - ✅ ONNX Runtime CPU support for neural network tracking
-            - ✅ All standard OpenTrack features
-            - ✅ Portable - runs on most Linux distributions
-            
-            ## Usage
-            ```bash
-            chmod +x OpenTrack-NeuralNet-${{ steps.build_info.outputs.version }}-x86_64.AppImage
-            ./OpenTrack-NeuralNet-${{ steps.build_info.outputs.version }}-x86_64.AppImage
-            ```
-            
-            ## System Requirements
-            - Linux x86_64
-            - Webcam or other video input device
-            - FUSE support (most distros have this by default)
-            
-            Built automatically on: ${{ github.run_id }}
-          files: OpenTrack-*.AppImage
+            # OpenTrack AppImages
+
+            Built from OpenTrack tag `${{ needs.check-version.outputs.opentrack_tag }}`.
+
+            ## Flavors
+            - `NoONNX`: OpenTrack without ONNX Runtime bundled
+            - `ONNX-CPU`: ONNX Runtime CPU bundled for neuralnet tracker
+            - `ONNX-GPU`: ONNX Runtime GPU bundled (requires system CUDA/NVIDIA runtime)
+
+            ## Notes
+            - `ONNX-GPU` may require additional CUDA runtime libraries on the target system.
+          files: dist/*.AppImage
           draft: false
           prerelease: false
         env:

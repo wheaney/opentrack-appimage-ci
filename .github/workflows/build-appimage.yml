@@ -400,7 +400,12 @@ jobs:
             | xargs -r -n 1 cp -v -t AppDir/usr/lib/ || true
 
           # Provide a deterministic AppRun that forces bundled libs/plugins.
-          cat > AppDir/AppRun <<'EOF'
+          # IMPORTANT: linuxdeploy's --custom-apprun copies the file into AppDir/AppRun.
+          # If the source path is already AppDir/AppRun, linuxdeploy can end up trying to
+          # copy AppDir/AppRun -> AppDir/AppRun (after removing the destination), which fails.
+          # Keep the custom AppRun outside AppDir and pass that path to linuxdeploy.
+          CUSTOM_APPRUN="$GITHUB_WORKSPACE/opentrack-AppRun"
+          cat > "$CUSTOM_APPRUN" <<'EOF'
           #!/bin/sh
           set -eu
 
@@ -430,7 +435,8 @@ jobs:
 
           exec "$APPDIR/usr/bin/opentrack" "$@"
           EOF
-          chmod +x AppDir/AppRun
+          chmod +x "$CUSTOM_APPRUN"
+          install -m 0755 "$CUSTOM_APPRUN" AppDir/AppRun
 
       - name: GPU diagnostics (CUDA deps)
         if: matrix.onnx_variant == 'gpu'
@@ -472,6 +478,12 @@ jobs:
           # Avoid requiring FUSE on the runner when executing AppImages.
           export APPIMAGE_EXTRACT_AND_RUN=1
           export VERSION="${{ steps.build_info.outputs.version }}"
+
+          CUSTOM_APPRUN="$GITHUB_WORKSPACE/opentrack-AppRun"
+          if [ ! -x "$CUSTOM_APPRUN" ]; then
+            echo "ERROR: Expected custom AppRun at $CUSTOM_APPRUN (missing or not executable)." >&2
+            exit 1
+          fi
 
           # linuxdeploy-plugin-qt expects Qt tools like qmlimportscanner on PATH.
           export PATH="/usr/lib/qt6/bin:/usr/lib/x86_64-linux-gnu/qt6/bin:$PATH"
@@ -521,7 +533,7 @@ jobs:
               --plugin qt \
               --desktop-file AppDir/usr/share/applications/opentrack.desktop \
               --executable AppDir/usr/bin/opentrack \
-              --custom-apprun AppDir/AppRun \
+              --custom-apprun "$CUSTOM_APPRUN" \
               "${exclude_args[@]}" \
               "${icon_args[@]}" 2>&1 | tee "$LINUXDEPLOY_LOG"; then
               echo "" >&2
@@ -550,7 +562,7 @@ jobs:
               --output appimage \
               --desktop-file AppDir/usr/share/applications/opentrack.desktop \
               --executable AppDir/usr/bin/opentrack \
-              --custom-apprun AppDir/AppRun \
+              --custom-apprun "$CUSTOM_APPRUN" \
               "${exclude_args[@]}" \
               "${icon_args[@]}" 2>&1 | tee "$LINUXDEPLOY_LOG"; then
               echo "" >&2

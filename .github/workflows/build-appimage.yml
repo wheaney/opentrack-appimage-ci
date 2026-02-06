@@ -297,7 +297,9 @@ jobs:
         run: |
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x linuxdeploy*.AppImage
+          chmod +x appimagetool-x86_64.AppImage
       
       - name: Prepare AppDir
         run: |
@@ -323,9 +325,18 @@ jobs:
             cp -v /usr/local/lib/libonnxruntime.so* AppDir/usr/libexec/opentrack/
 
             # GPU builds commonly include extra ONNX Runtime provider libs.
-            # Copy them when present.
-            cp -v /usr/local/lib/libonnxruntime_providers_*.so* AppDir/usr/lib/ 2>/dev/null || true
-            cp -v /usr/local/lib/libonnxruntime_providers_*.so* AppDir/usr/libexec/opentrack/ 2>/dev/null || true
+            # Note: linuxdeploy will try to resolve their CUDA DT_NEEDED deps
+            # (e.g., libcublasLt.so.12) and fail on GitHub-hosted runners.
+            # Workaround: stash provider libs for GPU builds and copy them into
+            # AppDir only after linuxdeploy has finished deploying deps.
+            if [ "${{ matrix.onnx_variant }}" = "gpu" ]; then
+              mkdir -p "$GITHUB_WORKSPACE/onnx_provider_stash"
+              cp -v /usr/local/lib/libonnxruntime_providers_*.so* "$GITHUB_WORKSPACE/onnx_provider_stash/" 2>/dev/null || true
+              echo "Stashed ONNX provider libs (GPU) for post-linuxdeploy packaging."
+            else
+              cp -v /usr/local/lib/libonnxruntime_providers_*.so* AppDir/usr/lib/ 2>/dev/null || true
+              cp -v /usr/local/lib/libonnxruntime_providers_*.so* AppDir/usr/libexec/opentrack/ 2>/dev/null || true
+            fi
           fi
           
           # Create desktop file if it doesn't exist
@@ -502,26 +513,59 @@ jobs:
             exclude_args+=( --exclude-library 'libnvidia-ml.so*' )
           fi
 
-          if ! ./linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            --plugin qt \
-            --output appimage \
-            --desktop-file AppDir/usr/share/applications/opentrack.desktop \
-            --executable AppDir/usr/bin/opentrack \
-            "${exclude_args[@]}" \
-            "${icon_args[@]}" 2>&1 | tee "$LINUXDEPLOY_LOG"; then
-            echo "" >&2
-            echo "linuxdeploy failed. Last 200 log lines:" >&2
-            tail -n 200 "$LINUXDEPLOY_LOG" >&2 || true
-            echo "" >&2
-            echo "Diagnostics:" >&2
-            command -v mksquashfs >&2 && mksquashfs -version 2>&1 | head -n 5 >&2 || true
-            command -v patchelf >&2 && patchelf --version 2>&1 | head -n 5 >&2 || true
-            exit 1
+          # For GPU builds, keep CUDA provider libs out of AppDir while running linuxdeploy,
+          # then add them back and build the AppImage with appimagetool.
+          if [ "${{ matrix.onnx_variant }}" = "gpu" ]; then
+            if ! ./linuxdeploy-x86_64.AppImage \
+              --appdir AppDir \
+              --plugin qt \
+              --desktop-file AppDir/usr/share/applications/opentrack.desktop \
+              --executable AppDir/usr/bin/opentrack \
+              --custom-apprun AppDir/AppRun \
+              "${exclude_args[@]}" \
+              "${icon_args[@]}" 2>&1 | tee "$LINUXDEPLOY_LOG"; then
+              echo "" >&2
+              echo "linuxdeploy failed. Last 200 log lines:" >&2
+              tail -n 200 "$LINUXDEPLOY_LOG" >&2 || true
+              echo "" >&2
+              echo "Diagnostics:" >&2
+              command -v mksquashfs >&2 && mksquashfs -version 2>&1 | head -n 5 >&2 || true
+              command -v patchelf >&2 && patchelf --version 2>&1 | head -n 5 >&2 || true
+              exit 1
+            fi
+
+            if [ -d "$GITHUB_WORKSPACE/onnx_provider_stash" ]; then
+              echo "Copying stashed ONNX provider libs into AppDir (post-linuxdeploy)..."
+              cp -v "$GITHUB_WORKSPACE"/onnx_provider_stash/libonnxruntime_providers_*.so* AppDir/usr/lib/ 2>/dev/null || true
+              mkdir -p AppDir/usr/libexec/opentrack
+              cp -v "$GITHUB_WORKSPACE"/onnx_provider_stash/libonnxruntime_providers_*.so* AppDir/usr/libexec/opentrack/ 2>/dev/null || true
+            fi
+
+            echo "Building AppImage with appimagetool (GPU flavor)..."
+            ./appimagetool-x86_64.AppImage AppDir "OpenTrack-${{ matrix.artifact_suffix }}-${VERSION}-x86_64.AppImage"
+          else
+            if ! ./linuxdeploy-x86_64.AppImage \
+              --appdir AppDir \
+              --plugin qt \
+              --output appimage \
+              --desktop-file AppDir/usr/share/applications/opentrack.desktop \
+              --executable AppDir/usr/bin/opentrack \
+              --custom-apprun AppDir/AppRun \
+              "${exclude_args[@]}" \
+              "${icon_args[@]}" 2>&1 | tee "$LINUXDEPLOY_LOG"; then
+              echo "" >&2
+              echo "linuxdeploy failed. Last 200 log lines:" >&2
+              tail -n 200 "$LINUXDEPLOY_LOG" >&2 || true
+              echo "" >&2
+              echo "Diagnostics:" >&2
+              command -v mksquashfs >&2 && mksquashfs -version 2>&1 | head -n 5 >&2 || true
+              command -v patchelf >&2 && patchelf --version 2>&1 | head -n 5 >&2 || true
+              exit 1
+            fi
+
+            # Rename to include flavor + version
+            mv OpenTrack-*.AppImage OpenTrack-${{ matrix.artifact_suffix }}-${VERSION}-x86_64.AppImage
           fi
-          
-          # Rename to include flavor + version
-          mv OpenTrack-*.AppImage OpenTrack-${{ matrix.artifact_suffix }}-${VERSION}-x86_64.AppImage
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4

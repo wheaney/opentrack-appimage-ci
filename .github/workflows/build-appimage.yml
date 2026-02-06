@@ -1,5 +1,9 @@
 name: Build OpenTrack AppImage
 
+# Default token permissions (principle of least privilege).
+permissions:
+  contents: read
+
 on:
   # Manual trigger
   workflow_dispatch:
@@ -514,8 +518,11 @@ jobs:
 
   release:
     needs: [check-version, build]
-    # if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4

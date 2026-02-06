@@ -102,16 +102,25 @@ jobs:
           - flavor: no-onnx
             artifact_suffix: NoONNX
             onnx_variant: none
+            onnx_pkg: ''
             allow_fail: false
           - flavor: onnx-cpu
             artifact_suffix: ONNX-CPU
             onnx_variant: cpu
+            onnx_pkg: onnxruntime-linux-x64
             allow_fail: false
           - flavor: onnx-gpu
             artifact_suffix: ONNX-GPU
             onnx_variant: gpu
+            onnx_pkg: onnxruntime-linux-x64-gpu
             # GPU builds often require CUDA runtime libs present at build/package time.
             # Keep the pipeline green while iterating on CUDA deps.
+            allow_fail: true
+          - flavor: onnx-gpu-cuda
+            artifact_suffix: ONNX-GPU-CUDA
+            onnx_variant: gpu_cuda13
+            # CUDA-specific ONNX Runtime build (CUDA 13.x series)
+            onnx_pkg: onnxruntime-linux-x64-gpu-cuda13
             allow_fail: true
     continue-on-error: ${{ matrix.allow_fail }}
     name: Build (${{ matrix.flavor }})
@@ -174,11 +183,8 @@ jobs:
         run: |
           ONNX_VERSION="1.23.2"
 
-          PKG="onnxruntime-linux-x64-${ONNX_VERSION}"
-          if [ "${{ matrix.onnx_variant }}" = "gpu" ]; then
-            # Note: this archive typically depends on system CUDA runtime libs.
-            PKG="onnxruntime-linux-x64-gpu-${ONNX_VERSION}"
-          fi
+          PKG_BASE="${{ matrix.onnx_pkg }}"
+          PKG="${PKG_BASE}-${ONNX_VERSION}"
 
           wget -q "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/${PKG}.tgz"
           tar xzf "${PKG}.tgz"
@@ -313,14 +319,17 @@ jobs:
             # (e.g., libcublasLt.so.12) and fail on GitHub-hosted runners.
             # Workaround: stash provider libs for GPU builds and copy them into
             # AppDir only after linuxdeploy has finished deploying deps.
-            if [ "${{ matrix.onnx_variant }}" = "gpu" ]; then
+            case "${{ matrix.onnx_variant }}" in
+              gpu* )
               mkdir -p "$GITHUB_WORKSPACE/onnx_provider_stash"
               cp -v /usr/local/lib/libonnxruntime_providers_*.so* "$GITHUB_WORKSPACE/onnx_provider_stash/" 2>/dev/null || true
               echo "Stashed ONNX provider libs (GPU) for post-linuxdeploy packaging."
-            else
+              ;;
+              * )
               cp -v /usr/local/lib/libonnxruntime_providers_*.so* AppDir/usr/lib/ 2>/dev/null || true
               cp -v /usr/local/lib/libonnxruntime_providers_*.so* AppDir/usr/libexec/opentrack/ 2>/dev/null || true
-            fi
+              ;;
+            esac
           fi
           
           # Create desktop file if it doesn't exist
@@ -423,7 +432,7 @@ jobs:
           install -m 0755 "$CUSTOM_APPRUN" AppDir/AppRun
 
       - name: GPU diagnostics (CUDA deps)
-        if: matrix.onnx_variant == 'gpu'
+        if: startsWith(matrix.onnx_variant, 'gpu')
         run: |
           set -euo pipefail
           echo "=== ONNX Runtime GPU diagnostics ==="
@@ -493,7 +502,8 @@ jobs:
           fi
 
           exclude_args=()
-          if [ "${{ matrix.onnx_variant }}" = "gpu" ]; then
+          case "${{ matrix.onnx_variant }}" in
+          gpu* )
             # GitHub-hosted runners do not ship CUDA/TensorRT runtime libs.
             # Exclude them from deployment so linuxdeploy can still produce an AppImage.
             # The resulting AppImage will require these libs to be available on the target system.
@@ -507,11 +517,13 @@ jobs:
             exclude_args+=( --exclude-library 'libnvinfer.so*' )
             exclude_args+=( --exclude-library 'libnvonnxparser.so*' )
             exclude_args+=( --exclude-library 'libnvidia-ml.so*' )
-          fi
+            ;;
+          esac
 
           # For GPU builds, keep CUDA provider libs out of AppDir while running linuxdeploy,
           # then add them back and build the AppImage with appimagetool.
-          if [ "${{ matrix.onnx_variant }}" = "gpu" ]; then
+          case "${{ matrix.onnx_variant }}" in
+          gpu* )
             if ! ./linuxdeploy-x86_64.AppImage \
               --appdir AppDir \
               --plugin qt \
@@ -539,7 +551,8 @@ jobs:
 
             echo "Building AppImage with appimagetool (GPU flavor)..."
             ./appimagetool-x86_64.AppImage AppDir "OpenTrack-${{ matrix.artifact_suffix }}-${VERSION}-x86_64.AppImage"
-          else
+            ;;
+          * )
             if ! ./linuxdeploy-x86_64.AppImage \
               --appdir AppDir \
               --plugin qt \
@@ -561,7 +574,8 @@ jobs:
 
             # Rename to include flavor + version
             mv OpenTrack-*.AppImage OpenTrack-${{ matrix.artifact_suffix }}-${VERSION}-x86_64.AppImage
-          fi
+            ;;
+          esac
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -605,7 +619,8 @@ jobs:
           ## Flavors
           - `NoONNX`: OpenTrack without NeuralNet (no ONNX Runtime bundled)
           - `ONNX-CPU`: OpenTrack with NeuralNet (ONNX Runtime CPU bundled)
-          - `ONNX-GPU`: OpenTrack with GPU-based NeuralNet processing (ONNX Runtime GPU bundled; requires CUDA/NVIDIA runtime libraries on the target system)
+          - `ONNX-GPU`: OpenTrack with GPU-based NeuralNet processing (ONNX Runtime GPU bundled)
+          - `ONNX-GPU-CUDA`: OpenTrack with CUDA-specific NeuralNet processing (ONNX Runtime GPU CUDA13 bundled; requires CUDA/NVIDIA runtime libraries on the target system)
 
           ## Notes
           - `ONNX-GPU` may require additional CUDA runtime libraries on the target system.

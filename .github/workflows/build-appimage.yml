@@ -168,6 +168,7 @@ jobs:
             qt6-base-private-dev \
             qt6-declarative-dev \
             qt6-declarative-dev-tools \
+            qt6-wayland \
             qt6-l10n-tools \
             qt6-tools-dev \
             qt6-tools-dev-tools \
@@ -435,6 +436,27 @@ jobs:
           fi
           if [ -n "$qt_plugin_path" ]; then
             export QT_PLUGIN_PATH="$qt_plugin_path"
+          fi
+
+          # Help Qt find the platform plugins inside the AppImage.
+          # Without this, Qt may try to use Wayland on a Wayland session and fail with:
+          #   qt.qpa.plugin: Could not find the Qt platform plugin "wayland" in ""
+          if [ -z "${QT_QPA_PLATFORM_PLUGIN_PATH:-}" ]; then
+            if [ -d "$APPDIR/usr/plugins/platforms" ]; then
+              export QT_QPA_PLATFORM_PLUGIN_PATH="$APPDIR/usr/plugins/platforms"
+            elif [ -d "$APPDIR/usr/lib/qt6/plugins/platforms" ]; then
+              export QT_QPA_PLATFORM_PLUGIN_PATH="$APPDIR/usr/lib/qt6/plugins/platforms"
+            fi
+          fi
+
+          # If we're on Wayland but the Wayland plugin isn't bundled, fall back to XCB.
+          # This keeps the AppImage small while still working on most desktops via XWayland.
+          if [ -z "${QT_QPA_PLATFORM:-}" ] && [ -n "${QT_QPA_PLATFORM_PLUGIN_PATH:-}" ]; then
+            if [ -f "$QT_QPA_PLATFORM_PLUGIN_PATH/libqwayland-egl.so" ] || [ -f "$QT_QPA_PLATFORM_PLUGIN_PATH/libqwayland-generic.so" ]; then
+              export QT_QPA_PLATFORM=wayland
+            elif [ -f "$QT_QPA_PLATFORM_PLUGIN_PATH/libqxcb.so" ]; then
+              export QT_QPA_PLATFORM=xcb
+            fi
           fi
 
           # Some linuxdeploy-plugin-qt layouts use usr/qml.

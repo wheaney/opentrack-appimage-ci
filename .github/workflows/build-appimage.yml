@@ -427,41 +427,54 @@ jobs:
           export XDG_DATA_DIRS="$APPDIR/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 
           # Prefer bundled Qt plugins if present.
-          qt_plugin_path=""
-          if [ -d "$APPDIR/usr/plugins" ]; then
-            qt_plugin_path="$APPDIR/usr/plugins"
-          fi
-          if [ -d "$APPDIR/usr/lib/qt6/plugins" ]; then
-            qt_plugin_path="$APPDIR/usr/lib/qt6/plugins${qt_plugin_path:+:$qt_plugin_path}"
-          fi
-          if [ -n "$qt_plugin_path" ]; then
-            export QT_PLUGIN_PATH="$qt_plugin_path"
+          qt_plugin_path_parts=""
+          for d in \
+            "$APPDIR/usr/plugins" \
+            "$APPDIR/usr/lib/qt6/plugins" \
+            "$APPDIR/usr/lib/x86_64-linux-gnu/qt6/plugins" \
+          ; do
+            if [ -d "$d" ]; then
+              qt_plugin_path_parts="$d${qt_plugin_path_parts:+:$qt_plugin_path_parts}"
+            fi
+          done
+          if [ -n "$qt_plugin_path_parts" ]; then
+            export QT_PLUGIN_PATH="$qt_plugin_path_parts${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
           fi
 
           # Help Qt find the platform plugins inside the AppImage.
           # Without this, Qt may try to use Wayland on a Wayland session and fail with:
           #   qt.qpa.plugin: Could not find the Qt platform plugin "wayland" in ""
-          if [ -z "${QT_QPA_PLATFORM_PLUGIN_PATH:-}" ]; then
-            if [ -d "$APPDIR/usr/plugins/platforms" ]; then
-              export QT_QPA_PLATFORM_PLUGIN_PATH="$APPDIR/usr/plugins/platforms"
-            elif [ -d "$APPDIR/usr/lib/qt6/plugins/platforms" ]; then
-              export QT_QPA_PLATFORM_PLUGIN_PATH="$APPDIR/usr/lib/qt6/plugins/platforms"
+          for d in \
+            "$APPDIR/usr/plugins/platforms" \
+            "$APPDIR/usr/lib/qt6/plugins/platforms" \
+            "$APPDIR/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms" \
+          ; do
+            if [ -d "$d" ]; then
+              export QT_QPA_PLATFORM_PLUGIN_PATH="$d"
+              break
             fi
+          done
+
+          # Default to XCB for portability.
+          # On Wayland desktops this uses XWayland and avoids hard-failing when
+          # the Wayland platform plugin isn't bundled.
+          if [ -z "${QT_QPA_PLATFORM:-}" ]; then
+            export QT_QPA_PLATFORM=xcb
           fi
 
-          # If we're on Wayland but the Wayland plugin isn't bundled, fall back to XCB.
-          # This keeps the AppImage small while still working on most desktops via XWayland.
-          if [ -z "${QT_QPA_PLATFORM:-}" ] && [ -n "${QT_QPA_PLATFORM_PLUGIN_PATH:-}" ]; then
-            if [ -f "$QT_QPA_PLATFORM_PLUGIN_PATH/libqwayland-egl.so" ] || [ -f "$QT_QPA_PLATFORM_PLUGIN_PATH/libqwayland-generic.so" ]; then
-              export QT_QPA_PLATFORM=wayland
-            elif [ -f "$QT_QPA_PLATFORM_PLUGIN_PATH/libqxcb.so" ]; then
-              export QT_QPA_PLATFORM=xcb
+          # Some linuxdeploy-plugin-qt layouts use usr/qml (or distro multiarch paths).
+          qml_parts=""
+          for d in \
+            "$APPDIR/usr/qml" \
+            "$APPDIR/usr/lib/qt6/qml" \
+            "$APPDIR/usr/lib/x86_64-linux-gnu/qt6/qml" \
+          ; do
+            if [ -d "$d" ]; then
+              qml_parts="$d${qml_parts:+:$qml_parts}"
             fi
-          fi
-
-          # Some linuxdeploy-plugin-qt layouts use usr/qml.
-          if [ -d "$APPDIR/usr/qml" ]; then
-            export QML2_IMPORT_PATH="$APPDIR/usr/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+          done
+          if [ -n "$qml_parts" ]; then
+            export QML2_IMPORT_PATH="$qml_parts${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
           fi
 
           exec "$APPDIR/usr/bin/opentrack" "$@"

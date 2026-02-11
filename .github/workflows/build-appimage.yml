@@ -217,6 +217,12 @@ jobs:
       - name: Clone and build OpenTrack
         run: |
           set -euo pipefail
+
+          # OpenTrack's Wine wrapper build invokes `wineg++`. On Ubuntu, the toolchain
+          # may live under /usr/lib/wine in addition to /usr/bin.
+          export PATH="/usr/lib/wine:/usr/lib/x86_64-linux-gnu/wine:${PATH}"
+          echo "wineg++: $(command -v wineg++ || echo 'NOT FOUND')"
+
           git clone --depth 1 --branch ${{ steps.build_info.outputs.tag }} https://github.com/opentrack/opentrack.git
           cd opentrack
           
@@ -228,6 +234,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr
             -DOPENTRACK_USERCONFIG=/dev/null
             -DSDK_ENABLE_LIBEVDEV=OFF
+            -DSDK_WINE:BOOL=ON
+            -DOPENTRACK_WINE_ARCH:STRING=-m64
             -DSDK_XPLANE:BOOL=OFF
             -D__otr_compile_flags_set=TRUE
             -DCMAKE_C_FLAGS="-ggdb -Wall -Wextra -Wpedantic"
@@ -252,9 +260,15 @@ jobs:
           grep -E '^SDK_(WINE|XPLANE):' CMakeCache.txt || true
           
           make -j$(nproc)
+
+          echo "Checking for Wine wrapper build output..."
+          find . -name 'opentrack-wrapper-wine.exe.so' -o -name 'proto-wine*' 2>/dev/null | head -n 200 || true
           
           # Install to temporary directory
           DESTDIR=$GITHUB_WORKSPACE/AppDir make install
+
+          echo "Checking for Wine wrapper installed into AppDir..."
+          find "$GITHUB_WORKSPACE/AppDir" -name 'opentrack-wrapper-wine.exe.so' -print -o -name 'opentrack-proto-wine*.so*' -print 2>/dev/null || true
 
           echo "Normalizing RPATH/RUNPATH inside AppDir (avoid host /usr/libexec leakage)..."
           fix_rpath() {

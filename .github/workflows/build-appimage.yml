@@ -148,9 +148,6 @@ jobs:
       
       - name: Install system dependencies
         run: |
-          # OpenTrack's Wine wrapper build can require Wine toolchain components
-          # that are packaged for i386; enable multiarch so they can be installed.
-          sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y \
             binutils \
@@ -182,7 +179,6 @@ jobs:
             wget \
             file \
             desktop-file-utils \
-            wine32-tools \
             wine64-tools \
             zsync
       

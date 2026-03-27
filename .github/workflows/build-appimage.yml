@@ -175,6 +175,7 @@ jobs:
             qt6-tools-dev-tools \
             libqt6svg6-dev \
             libopencv-dev \
+            qt6-serialport-dev \
             libproc2-dev \
             wget \
             file \
